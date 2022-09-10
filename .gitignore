@@ -1,0 +1,6 @@
+env
+__pycache__
+*.session
+*.pyc
+.idea
+*.sqlite3
