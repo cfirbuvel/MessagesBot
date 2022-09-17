@@ -3,6 +3,7 @@ import random
 
 from faker import Faker
 from pyrogram import Client
+from pyrogram.types  import Message
 
 from . import settings
 
@@ -34,3 +35,5 @@ async def tg_client(name, device_model, system_version, session_string=None):
         yield client
     finally:
         await client.disconnect()
+
+

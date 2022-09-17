@@ -10,29 +10,11 @@ from pyrogram.errors import UserDeactivatedBan, UsernameOccupied
 from pyrogram.raw import functions
 
 from . import settings
-from .models import Account
+from .models import Account, Message, Chat
 from .utils import tg_client
 
 
 logger = logging.getLogger(__name__)
-
-
-# async def move_accs():
-#     from motor.motor_asyncio import AsyncIOMotorClient
-#     mongo = AsyncIOMotorClient(settings.MONGO_URL)
-#     db = mongo[settings.MONGO_DATABASE]
-#     accounts = db.accounts
-#     items = accounts.find()
-#     items = await items.to_list(length=None)
-#     for doc in items:
-#         await Account.create(
-#             name=doc['name'],
-#             session=doc['session'],
-#             device_model=doc['device_model'],
-#             system_version=doc['system_version'],
-#             lang=doc['lang'],
-#         )
-#     print('Done')
 
 
 async def init_client(client, acc):
@@ -72,8 +54,8 @@ async def sender_worker(accounts, message, queue):
                 msg = f'Hello {name}!\n{message}'
                 try:
                     await client.send_message(user_id, msg)
-                except Exception as e:
-                    logger.exception(e)
+                except Exception as ex:
+                    logger.exception(ex)
                 else:
                     limit -= 1
                     logger.info(f'Sent message to {user_id}, {limit} left')
@@ -83,13 +65,11 @@ async def sender_worker(accounts, message, queue):
             break
 
 
+#     # chat_id = 'https://t.me/BestWeedCenter'
 # TODO: Set status "WORKING" or like that if allowing to send multiple messages
 # TODO: leave from chats if there's 500 limit reached
 # async def spam_it(chat_id, message='Hello World!', filters=None, limit=None):
-async def spam_it():
-    # chat_id = 'https://t.me/BestWeedCenter'
-    chat_id = 'https://t.me/canex_A'
-    message = 'I am as stupid as a piece of metal.'
+async def send_messages(chat_obj: Chat, message: Message):
     Faker.seed(13)
     accounts = await Account.filter(status=Account.Status.ACTIVE)
     accounts = iter(accounts)
@@ -98,7 +78,11 @@ async def spam_it():
         async with tg_client(acc.name, acc.device_model, acc.system_version, acc.session) as client:
             if not await init_client(client, acc):
                 continue
-            chat = await client.join_chat('BestWeedCenter')
+            chat_id = chat_obj.identifier
+            try:
+                chat = await client.get_chat(chat_id)
+            except ValueError:
+                chat = await client.join_chat('BestWeedCenter')
             # print(chat)
             # return
             # chat = await client.join_chat(chat_id)

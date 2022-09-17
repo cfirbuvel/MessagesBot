@@ -1,49 +1,75 @@
+import argparse
 import asyncio
 import logging.config
+import os
+import sys
 
 # from pyrogram import Client
-from pyrogram.methods.utilities.idle import idle
+from aiogram import executor
+# from pyrogram.methods.utilities.idle import idle
 from tortoise import Tortoise
 import uvloop
+import watchfiles
 
-from main import settings
-from main.conversation import ConversationClient
-from main.models import init_db
-from main.tasks import spam_it
+from msg_bot import settings
+from msg_bot.handlers import *
+from msg_bot.models import init_db
+
 
 logging.config.dictConfig(settings.LOGGING)
+# async def msg_bot():
+#     await init_db()
+#     plugins = {
+#         'root': 'msg_bot',
+#         'include': ['handlers']
+#     }
+#     app = Client(
+#         'tg_spam_bot',
+#         api_id=settings.API_ID,
+#         api_hash=settings.API_HASH,
+#         app_version='1.0',
+#         device_model='PC',
+#         system_version='Pop!_OS 22.04 LTS',
+#         # lang_code='en'  # TODO: i18n
+#         bot_token=settings.BOT_TOKEN,
+#         # session_string=,
+#         # in_memory=,
+#
+#         plugins=plugins,
+#         # parse_mode='html',
+#     )
+#     await app.start()
+#     await idle()
+#     await app.stop()
+#     # app.run()
+#     # await move_accs()
+#     # await spam_it()
+#     await Tortoise.close_connections()
 
 
-async def main():
+async def on_startup(dispatcher):
     await init_db()
-    plugins = {
-        'root': 'main',
-        'include': ['handlers']
-    }
-    app = ConversationClient(
-        'tg_spam_bot',
-        api_id=settings.API_ID,
-        api_hash=settings.API_HASH,
-        app_version='1.0',
-        device_model='PC',
-        system_version='Pop!_OS 22.04 LTS',
-        # lang_code='en'  # TODO: i18n
-        bot_token=settings.BOT_TOKEN,
-        # session_string=,
-        # in_memory=,
 
-        plugins=plugins,
-        # parse_mode='html',
-    )
-    await app.start()
-    await idle()
-    await app.stop()
-    # app.run()
-    # await move_accs()
-    # await spam_it()
+
+async def on_shutdown(dispatcher):
     await Tortoise.close_connections()
 
 
-if __name__ == '__main__':
+def main():
     uvloop.install()
-    asyncio.run(main())
+    executor.start_polling(dp, on_startup=on_startup, on_shutdown=on_shutdown)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-w', '--watch', action='store_true', help='Watch for changes in files and restart')
+    args = parser.parse_args(sys.argv[1:])
+    if args.watch:
+        # path = os.path.abspath(os.path.dirname(__file__))
+        watchfiles.run_process(os.path.abspath('msg_bot'), target=main)
+    else:
+        main()
+
+    # uvloop.install()
+    # executor.start_polling(dp, on_startup=on_startup, on_shutdown=on_shutdown)
+    # asyncio.run(msg_bot())
