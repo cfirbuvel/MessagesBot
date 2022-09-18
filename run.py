@@ -60,10 +60,18 @@ def main():
     executor.start_polling(dp, on_startup=on_startup, on_shutdown=on_shutdown)
 
 
+async def run_task():
+    from msg_bot import tasks
+    await on_startup(None)
+    await tasks.send_messages()
+    await on_shutdown(None)
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-w', '--watch', action='store_true', help='Watch for changes in files and restart')
     args = parser.parse_args(sys.argv[1:])
+    # asyncio.run(run_task())
     if args.watch:
         # path = os.path.abspath(os.path.dirname(__file__))
         watchfiles.run_process(os.path.abspath('msg_bot'), target=main)

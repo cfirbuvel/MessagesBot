@@ -7,7 +7,7 @@ from aiogram.dispatcher.middlewares import BaseMiddleware
 
 
 class MediaGroupMiddleware(BaseMiddleware):
-    """This middleware is for capturing media groups."""
+    """This middleware is for capturing edit_media groups."""
     content_types = [
         ContentType.AUDIO,
         ContentType.DOCUMENT,
@@ -64,8 +64,8 @@ class MediaGroupMiddleware(BaseMiddleware):
 #             file_id = obj[obj.content_type].file_id
 #
 #         try:
-#             # We can also add a caption to each file by specifying `"caption": "text"`
-#             media_group.attach({"media": file_id, "type": obj.content_type})
+#             # We can also add a caption to each file by specifying `"caption": "edit_text"`
+#             media_group.attach({"edit_media": file_id, "type": obj.content_type})
 #         except ValueError:
 #             return await message.answer("This type of album is not supported by aiogram.")
 #

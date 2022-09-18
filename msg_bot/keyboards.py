@@ -54,15 +54,16 @@ BACK_BTN = B(_('🠈 Back'), callback_data='back')  # 🔙↩️◀️🡄🢀�
 def main():
     return [
         [B(_('✉️ Messages'), callback_data='messages')],
-        [B(_('👥 Accounts'), callback_data='accounts')],
+        [B(_('🤖 Accounts'), callback_data='accounts')],
         # [B(_('Groups'), callback_data='groups')],
+        [BACK_BTN]
     ]
 
 
 @inline_markup
 def messages():
     return [
-        [B(_('🗂 My messages'), callback_data='my')],
+        [B(_('🗂 My messages'), callback_data='list')],
         [B(_('✏️ Create'), callback_data='create')],
         [BACK_BTN]
     ]
@@ -74,17 +75,25 @@ def message_detail(msg: Message=None):
         [B(_('▶️ Start task'), callback_data='start')],
         [B(_('🧾 Stats'), callback_data='stats')],
         [B(_('🎫 Filters'), callback_data='filters')],
-        [B(_('📋 Edit text'), callback_data='text')],
-        [B(_('📷 Edit media'), callback_data='media')],
+        [B(_('📋 Edit text'), callback_data='edit_text')],
+        [B(_('📷 Edit media'), callback_data='edit_media')],
         [B(_('🚫 Delete'), callback_data='delete')],
         [BACK_BTN]
     ]
 
 
+# @inline_markup
+# def open_msg(msg_id):
+#     return [
+#         [B(_('Open message'), callback_data=f'open_msg:{msg_id}')],
+#     ]
+
+
 @inline_markup
-def open_msg(msg_id):
+def accounts():
     return [
-        [B(_('Open message'), callback_data=f'open_msg:{msg_id}')],
+        [B(_('🗂 My accounts'), callback_data='list')],
+        [B(_('💾 Upload'), callback_data='upload')],
     ]
 
 

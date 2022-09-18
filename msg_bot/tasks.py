@@ -10,7 +10,7 @@ from pyrogram.errors import UserDeactivatedBan, UsernameOccupied
 from pyrogram.raw import functions
 
 from . import settings
-from .models import Account, Message, Chat
+from .models import Account, Message, MessagesTask, Chat
 from .utils import tg_client
 
 
@@ -69,7 +69,7 @@ async def sender_worker(accounts, message, queue):
 # TODO: Set status "WORKING" or like that if allowing to send multiple messages
 # TODO: leave from chats if there's 500 limit reached
 # async def spam_it(chat_id, message='Hello World!', filters=None, limit=None):
-async def send_messages(chat_obj: Chat, message: Message):
+async def send_messages(task_obj: MessagesTask):
     Faker.seed(13)
     accounts = await Account.filter(status=Account.Status.ACTIVE)
     accounts = iter(accounts)
@@ -78,11 +78,15 @@ async def send_messages(chat_obj: Chat, message: Message):
         async with tg_client(acc.name, acc.device_model, acc.system_version, acc.session) as client:
             if not await init_client(client, acc):
                 continue
-            chat_id = chat_obj.identifier
+            # chat_id = chat_obj.identifier
+            chat_id = '+uCn6rUtgJnliZWMy'
             try:
                 chat = await client.get_chat(chat_id)
             except ValueError:
-                chat = await client.join_chat('BestWeedCenter')
+                chat = await client.join_chat(chat_id)
+            print('CHAT')
+            print(chat)
+            return
             # print(chat)
             # return
             # chat = await client.join_chat(chat_id)

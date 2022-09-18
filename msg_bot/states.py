@@ -16,16 +16,29 @@ class Main(StatesGroup):
 
 
 class Messages(StatesGroup):
-    my = State()
+    list = State()
     create = State()
-
-
-class MessageDetail(StatesGroup):
-    main = State()
+    detail = State()
     start_task = State()
-    text = State()
-    media = State()
+    edit_text = State()
+    edit_media = State()
     delete = State()
+
+
+class Accounts(StatesGroup):
+    list = State()
+    upload = State()
+    detail = State()
+
+
+async def enter_menu(update=Union[types.Message, types.CallbackQuery]):
+    await Main.main.set()
+    msg = _('Welcome to <b>MsgBot</b>!')
+    if isinstance(update, types.CallbackQuery):
+        await update.message.edit_text(msg, reply_markup=keyboards.main())
+        await update.answer()
+    else:
+        await update.answer(msg, reply_markup=keyboards.main())
 
 
 async def messages(query: types.CallbackQuery):
@@ -40,19 +53,19 @@ async def messages(query: types.CallbackQuery):
 #     msg_id = (await state.get_data())['msg_id']
 #     msg = await Message.get(id=msg_id)
 #     msg_name = msg.name
-#     text = msg.text
-#     media = await msg.get_media()
-#     if media:
-#         if type(media) == list:
+#     edit_text = msg.edit_text
+#     edit_media = await msg.get_media()
+#     if edit_media:
+#         if type(edit_media) == list:
 #             media_group = types.MediaGroup()
-#             for item in media:
+#             for item in edit_media:
 #                 media_group.attach(await item.get_input_media(False))
 #             msg = await query.message.answer_media_group(media_group)
 #         else:
-#             method = getattr(query.message, 'answer_' + media.type.value)
-#             msg = await method(media.file_id, caption=text)
+#             method = getattr(query.message, 'answer_' + edit_media.type.value)
+#             msg = await method(edit_media.file_id, caption=edit_text)
 #     else:
-#         msg = await query.message.edit_text(text)
+#         msg = await query.message.edit_text(edit_text)
 #     await state.update_data(preview_id=msg.message_id)
 #     reply_markup = keyboards.message_detail()
 #     await query.message.answer(msg_name, reply_markup=reply_markup)
