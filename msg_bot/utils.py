@@ -65,3 +65,11 @@ def get_device_info():
     # TODO: Store devices together with session accs in db (STABILITY!)
     device, system = (item.strip() for item in info.rsplit(';', 1))
     return device, system
+
+
+def get_full_name(user):
+    return ' '.join(filter(None, (user.first_name, user.last_name)))
+
+
+    # def generate_invites_num():
+    #     #     return random.randint(45, 50)

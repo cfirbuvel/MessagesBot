@@ -12,6 +12,7 @@ from inspect import getmembers
 from pprint import pprint
 
 from aiogram import types
+from aiogram.utils.exceptions import MessageToDeleteNotFound, MessageCantBeDeleted
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters import Text, Regexp
 from aiogram.utils import markdown as md
@@ -21,13 +22,27 @@ from tortoise.transactions import in_transaction
 
 from . import keyboards, settings, states
 from .bot import dispatcher as dp
-from .models import Account, MediaType, Message, MessageMedia, MessagesTask, Chat, UsersFilter
-from .tasks import send_messages
+from .models import Acc, MediaType, Msg, MsgMedia, MsgTask, Chat, MsgSettings, UserFilter
+from .tasks import send_message
 from .utils import get_device_info, session_file_to_string
 # from .states import Main, Messages, messages
 
 
 logger = logging.getLogger(__name__)
+
+
+async def delete_msg_preview(state):
+    async with state.proxy() as data:
+        msg_ids = data.get('msg_preview')
+        if msg_ids:
+            bot = dp.bot
+            chat_id = state.chat
+            for msg_id in msg_ids:
+                try:
+                    await bot.delete_message(chat_id, msg_id)
+                except (MessageToDeleteNotFound, MessageCantBeDeleted):
+                    pass
+            del data['msg_preview']
 
 
 @dp.message_handler(commands=['start'], state='*')
@@ -66,34 +81,15 @@ async def my_messages(query: types.CallbackQuery, state: FSMContext):
 async def select_message(query: types.CallbackQuery, state: FSMContext):
     msg_id = int(query.data)
     try:
-        message = await Message.get(id=msg_id)
+        msg = await Msg.get(id=msg_id)
     except DoesNotExist:
         user_data = await state.get_data()
         reply_markup = await keyboards.messages_list(user_data['page'])
         await query.message.edit_reply_markup(reply_markup=reply_markup)
-        await query.answer(_('Message not found!'))
+        await query.answer(_('Msg not found!'))
         return
     await state.update_data(msg_id=msg_id)
-    await states.Messages.detail.set()
-    text = message.text
-    media = await message.get_media()
-    if media:
-        await query.message.delete()
-        if type(media) == list:
-            media_group = types.MediaGroup()
-            for item in media:
-                media_group.attach(await item.get_input_media(False))
-            msg = await query.message.answer_media_group(media_group)
-        else:
-            method = getattr(query.message, 'answer_' + media.type.value)
-            msg = await method(media.file_id, caption=text, parse_mode=types.ParseMode.MARKDOWN)
-        await state.update_data(preview_id=msg.message_id)
-    elif text:
-        msg = await query.message.edit_text(text, parse_mode=types.ParseMode.MARKDOWN)
-        await state.update_data(preview_id=msg.message_id)
-    reply_markup = keyboards.message_detail()
-    await query.message.answer(message.name, reply_markup=reply_markup)
-    await query.answer()
+    await states.message_detail(query, state, msg)
 
 
 @dp.callback_query_handler(Text(['prev', 'next']), state=states.Messages.list)
@@ -122,15 +118,16 @@ async def create_message(query: types.CallbackQuery, state: FSMContext):
 async def message_name(message: types.Message, state: FSMContext):
     name = message.text
     try:
-        await Message.get(name=name)
+        await Msg.get(name=name)
     except DoesNotExist:
-        msg = await Message.create(name=name)
-        await state.update_data(msg_id=msg.id)
         await states.Messages.detail.set()
-        msg = _('Please enter message edit_text <i>and/or</i> send media.')
+        msg_settings = await MsgSettings.create()
+        msg = await Msg.create(name=name, settings=msg_settings)
+        await state.update_data(msg_id=msg.id)
+        msg = _('Please enter message text <i>and/or</i> send media.')
         await message.reply(msg, reply_markup=keyboards.message_detail())
     else:
-        msg = _('Message with this name already exists. Please enter another name.')
+        msg = _('Msg with this name already exists. Please enter another name.')
         await message.reply(msg, reply_markup=keyboards.back())
 
 
@@ -141,7 +138,13 @@ async def create_message_back(query: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query_handler(Text('start'), state=states.Messages.detail)
 async def start_task(query: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    message = await Msg.get(id=data['msg_id'])
+    if not await message.has_content():
+        await query.answer(_('Add text and/or media first.'))
+        return
     await states.Messages.start_task.set()
+    await delete_msg_preview(state)
     msg = _('Please send a link to join the group or its username for public groups.')
     reply_markup = keyboards.back()
     if await Chat.exists():
@@ -160,23 +163,32 @@ async def task_group(update: Union[types.Message, types.CallbackQuery], state: F
         chat = await Chat.get(id=int(update.data))
     else:
         message = update
-        link = update.text
+        link = update.text.lower()
         match = re.match(r'^(https?://)?(?:t(?:elegram)?\.me/)?(?:joinchat/+)?\w+$', link)
         if not match:
-            msg = _('Invalid link. Valid domains are t.me and telegram.me. Please try again.')
+            msg = _('Invalid link. Valid domains are https://t.me/ and https://telegram.me/. Please try again.')
             reply_markup = keyboards.back()
             if await Chat.exists():
                 msg += _('\n\nOr select previously used group:')
                 reply_markup = await keyboards.chats()
-            await message.reply(msg, reply_markup=reply_markup)
+            await message.reply(msg, reply_markup=reply_markup, disable_web_page_preview=True)
             return
+        if not match.groups()[0]:
+            link = 'https://' + link
+        # TODO: handle duplicate links in case it was changed in one
+        # try:
+        #     await Chat.get(link=link)
         chat = await Chat.create(link=link)
     user_data = await state.get_data()
-    msg = await Message.get(id=user_data['msg_id'])
-    task = await MessagesTask.create(chat=chat, message=msg)
-    await task.filters.add(await UsersFilter.get(name=UsersFilter.Type.RECENT))
-    task_name = 'send_messages'
-    task = asyncio.create_task(send_messages(task), name=task_name)
+    msg = await Msg.get(id=user_data['msg_id'])
+    await MsgTask.filter(status=MsgTask.Status.ACTIVE).update(status=MsgTask.Status.CANCELED)
+    msg_settings = await msg.settings
+    task_settings = await MsgSettings.create(filters=msg_settings.filters, delay=msg_settings.delay)
+
+    task = await MsgTask.create(chat=chat, message=msg)
+    # await task.filters.add(await UsersFilter.get(name=UsersFilter.Type.RECENT))
+    task_name = 'send_message'
+    task = asyncio.create_task(send_message(task), name=task_name)
     await state.update_data(msgs_task=task_name)
     if is_query:
         await message.edit_text(_('Task started!'))
@@ -185,11 +197,96 @@ async def task_group(update: Union[types.Message, types.CallbackQuery], state: F
     await states.enter_menu(update)
 
 
+@dp.callback_query_handler(Text('settings'), state=states.Messages.detail)
+async def message_settings(query: types.CallbackQuery, state: FSMContext):
+    await states.Messages.settings.set()
+    await delete_msg_preview(state)
+    data = await state.get_data()
+    msg = await Msg.get(id=data['msg_id'])
+    await states.msg_settings(query, await msg.settings)
+
+
+@dp.callback_query_handler(Text('limit'), state=states.Messages.settings)
+async def msg_limit(query: types.CallbackQuery, state: FSMContext):
+    await states.MsgSettings.limit.set()
+    msg = _('Please enter the number of messages to send daily.')  # Enter 0 to set no limit.
+    await query.message.edit_text(msg, reply_markup=keyboards.back())
+    await query.answer()
+
+
+@dp.message_handler(state=states.MsgSettings.limit)
+async def msg_limit_entered(message: types.Message, state: FSMContext):
+    try:
+        val = int(message.text)
+    except ValueError:
+        msg = _('Please enter a number.')
+        await message.reply(msg, reply_markup=keyboards.back())
+    else:
+        await states.Messages.settings.set()
+        data = await state.get_data()
+        msg = await Msg.get(id=data['msg_id'])
+        msg_settings = await msg.settings
+        msg_settings.daily_limit = max(1, val)  # TODO: 0 to disable limit
+        await msg_settings.save()
+        await states.msg_settings(message, msg_settings)
+
+
+@dp.callback_query_handler(Text('back'), state=states.MsgSettings.limit)
+async def msg_limit_back(query: types.CallbackQuery, state: FSMContext):
+    await states.Msg.settings.set()
+    data = await state.get_data()
+    msg = await Msg.get(id=data['msg_id'])
+    await states.msg_settings(query, await msg.settings)
+
+
+@dp.callback_query_handler(Text('filters'), state=states.Messages.settings)
+async def msg_filters(query: types.CallbackQuery, state: FSMContext):
+    await states.MsgSettings.filters.set()
+    data = await state.get_data()
+    msg = await Msg.get(id=data['msg_id'])
+    reply_markup = keyboards.filters(await msg.settings)
+    msg = _('Please select filters to filter out users.')
+    await query.message.edit_text(msg, reply_markup=reply_markup)
+    await query.answer()
+
+
+@dp.callback_query_handler(Regexp(r'^[A-Z_]$'), state=states.MsgSettings.filters)
+async def msg_filters_toggle(query: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    msg = await Msg.get(id=data['msg_id'])
+    msg_settings = await msg.settings
+    val = UserFilter[query.data].value
+    filters = msg_settings.filters
+    if val in filters:
+        filters.remove(val)
+    else:
+        filters.append(val)
+    await msg_settings.save()
+    reply_markup = keyboards.filters(msg_settings)
+    await query.message.edit_reply_markup(reply_markup=reply_markup)
+    await query.answer()
+
+
+@dp.callback_query_handler(Text('back'), state=states.MsgSettings.filters)
+async def msg_filters_back(query: types.CallbackQuery, state: FSMContext):
+    await states.Msg.settings.set()
+    data = await state.get_data()
+    msg = await Msg.get(id=data['msg_id'])
+    await states.msg_settings(query, await msg.settings)
+
+
+@dp.callback_query_handler(Text('back'), state=states.Messages.settings)
+async def msg_settings_back(query: types.CallbackQuery, state: FSMContext):
+    await states.message_detail(query, state)
+
+
 @dp.callback_query_handler(Text('edit_text'), state=states.Messages.detail)
 async def message_text(query: types.CallbackQuery, state: FSMContext):
     await states.Messages.edit_text.set()
+    async with state.proxy() as data:
+        del data['msg_preview']
     msg = ('Please, enter message text. You can include markdown.\n\n'
-           'Message will start with "Hello {username}!" by default.\n'
+           'Msg will start with "Hello {username}!" by default.\n'
            'To change it, add <code>{username}</code> anywhere in the text.')
     await query.message.edit_text(msg, reply_markup=keyboards.back())
     await query.answer()
@@ -201,61 +298,26 @@ async def message_text_entered(message: types.Message, state: FSMContext):
     if '{username}' not in text:
         text = 'Hello {username}!\n' + text
     if len(text) > 4096:
-        await message.reply(_('Message is too long. Please enter another text.'))
+        await message.reply(_('Msg is too long. Please enter another text.'))
         return
-    await states.Messages.detail.set()
-    msg_id = (await state.get_data())['msg_id']
-    msg = await Message.get(id=msg_id)
-    msg.text = message.text
+    await state.reset_state(with_data=False)
+    data = await state.get_data()
+    msg = await Msg.get(id=data['msg_id'])
+    msg.text = text
     await msg.save()
-    await states.Messages.detail.set()
-    msg_name = msg.name
-    text = msg.text
-    media = await msg.get_media()
-    if media:
-        if type(media) == list:
-            media_group = types.MediaGroup()
-            for item in media:
-                media_group.attach(await item.get_input_media(False))
-            msg = await message.answer_media_group(media_group)
-        else:
-            method = getattr(message, 'answer_' + media.type.value)
-            msg = await method(media.file_id, caption=text, parse_mode=types.ParseMode.MARKDOWN)
-    else:
-        msg = await message.answer(text, parse_mode=types.ParseMode.MARKDOWN)
-    await state.update_data(preview_id=msg.message_id)
-    reply_markup = keyboards.message_detail()
-    await message.answer(msg_name, reply_markup=reply_markup)
+    await states.message_detail(message, state, msg)
 
 
-@dp.callback_query_handler(Text('back'), state=states.Messages.detail)
+@dp.callback_query_handler(Text('back'), state=states.Messages.edit_text)
 async def message_text_back(query: types.CallbackQuery, state: FSMContext):
-    await states.Messages.detail.set()
-    msg_id = (await state.get_data())['msg_id']
-    msg = await Message.get(id=msg_id)
-    msg_name = msg.name
-    text = msg.text
-    media = await msg.get_media()
-    if media:
-        if type(media) == list:
-            media_group = types.MediaGroup()
-            for item in media:
-                media_group.attach(await item.get_input_media(False))
-            msg = await query.message.answer_media_group(media_group)
-        else:
-            method = getattr(query.message, 'answer_' + media.type.value)
-            msg = await method(media.file_id, caption=text, parse_mode=types.ParseMode.MARKDOWN)
-    else:
-        msg = await query.message.edit_text(text, parse_mode=types.ParseMode.MARKDOWN)
-    await state.update_data(preview_id=msg.message_id)
-    reply_markup = keyboards.message_detail()
-    await query.message.answer(msg_name, reply_markup=reply_markup)
-    await query.answer()
+    await states.message_detail(query, state)
 
 
 @dp.callback_query_handler(Text('edit_media'), state=states.Messages.detail)
 async def message_media(query: types.CallbackQuery, state: FSMContext):
     await states.Messages.edit_media.set()
+    async with state.proxy() as data:
+        del data['msg_preview']
     msg = _('Please send single photo or video, or multiple as media group.')
     await query.message.edit_text(msg, reply_markup=keyboards.back())
     await query.answer()
@@ -265,9 +327,9 @@ async def message_media(query: types.CallbackQuery, state: FSMContext):
 async def message_media(message: types.Message, state: FSMContext):
     user_data = await state.get_data()
     try:
-        msg = await Message.get(id=user_data['msg_id'])
+        msg = await Msg.get(id=user_data['msg_id'])
     except DoesNotExist:
-        await message.reply(_('Message not found!'))  # FIXME
+        await message.reply(_('Msg not found!'))  # FIXME
         return
     await state.reset_state(with_data=False)
     await message.reply(_('Downloading media...'))
@@ -286,7 +348,7 @@ async def message_media(message: types.Message, state: FSMContext):
         file_id = file.file_id
         filepath = settings.MEDIA_ROOT / msg.name / (file_id + os.path.splitext(file.file_path)[1])
         await file.download(timeout=3000, destination_file=filepath)
-        objects.append(MessageMedia(
+        objects.append(MsgMedia(
             message=msg,
             type=content_type,
             file_id=file_id,
@@ -294,58 +356,22 @@ async def message_media(message: types.Message, state: FSMContext):
             order=order
         ))
     async with in_transaction() as connection:
-        await msg.media.all().delete()
-        await MessageMedia.bulk_create(objects)
+        await msg.media.all().using_db(connection).delete()
+        await MsgMedia.bulk_create(objects)
     # TODO: Msg main refresh
-    msg_name = msg.name
     await message.answer(_('Media for <i>{}</i> saved.').format(msg.name))
-    text = msg.text
-    media = await msg.get_media()
-    if media:
-        if type(media) == list:
-            media_group = types.MediaGroup()
-            for item in media:
-                media_group.attach(await item.get_input_media(False))
-            msg = await message.answer_media_group(media_group)
-        else:
-            method = getattr(message, 'answer_' + media.type.value)
-            msg = await method(media.file_id, caption=text, parse_mode=types.ParseMode.MARKDOWN)
-    else:
-        msg = await message.answer(text, parse_mode=types.ParseMode.MARKDOWN)
-    await state.update_data(preview_id=msg.message_id)
-    reply_markup = keyboards.message_detail()
-    await message.answer(msg_name, reply_markup=reply_markup)
+    await states.message_detail(message, state, msg)
 
 
 @dp.callback_query_handler(Text('back'), state=states.Messages.edit_media)
 async def message_media_back(query: types.CallbackQuery, state: FSMContext):
-    await states.Messages.detail.set()
-    msg_id = (await state.get_data())['msg_id']
-    msg = await Message.get(id=msg_id)
-    msg_name = msg.name
-    text = msg.text
-    media = await msg.get_media()
-    if media:
-        if type(media) == list:
-            media_group = types.MediaGroup()
-            for item in media:
-                media_group.attach(await item.get_input_media(False))
-            msg = await query.message.answer_media_group(media_group)
-        else:
-            method = getattr(query.message, 'answer_' + media.type.value)
-            msg = await method(media.file_id, caption=text)
-    else:
-        msg = await query.message.edit_text(text)
-    await state.update_data(preview_id=msg.message_id)
-    reply_markup = keyboards.message_detail()
-    await query.message.answer(msg_name, reply_markup=reply_markup)
-    await query.answer()
+    await states.message_detail(query, state)
 
 
 # @dp.callback_query_handler(Text(startswith='open_msg'), state='*')
 # async def open_msg(query: types.CallbackQuery, state: FSMContext):
 #     msg_id = int(query.data.split(':')[1])
-#     msg = await Message.get(id=msg_id)
+#     msg = await Msg.get(id=msg_id)
 #     await query.message.edit_text(msg.edit_text, reply_markup=keyboards.message_detail())
 #     await query.answer()
 
@@ -398,7 +424,7 @@ async def upload_accounts_files(message: types.Message, state: FSMContext):
                         sessions[phone] = os.path.join(dirpath, filename)
             # task.cancel()
     elif ext == '.session':
-        if await Account.filter(name=name).exists():
+        if await Acc.filter(name=name).exists():
             msg = '🚫 This account already exists. Please upload another file.'
             await message.reply(msg, reply_markup=keyboards.back())
         else:
@@ -410,9 +436,9 @@ async def upload_accounts_files(message: types.Message, state: FSMContext):
     for i, data in enumerate(sessions.items()):
         name, filepath = data
         session = await session_file_to_string(filepath)
-        if not await Account.filter(name=name).exists():
+        if not await Acc.filter(name=name).exists():
             device, system = get_device_info()
-            await Account.create(
+            await Acc.create(
                 name=name,
                 session=session,
                 device_model=device,

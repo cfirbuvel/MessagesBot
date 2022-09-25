@@ -1,5 +1,6 @@
 env
 media
+sessions
 __pycache__
 *.session
 *.pyc

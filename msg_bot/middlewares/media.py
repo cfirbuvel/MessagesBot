@@ -25,7 +25,7 @@ class MediaGroupMiddleware(BaseMiddleware):
         self.latency = latency
         super().__init__()
 
-    # def has_media(self, message: Message) -> bool:
+    # def has_media(self, message: Msg) -> bool:
     #     return message.content_type in self.content_types
 
     async def on_process_message(self, message: Message, data: dict):
@@ -54,7 +54,7 @@ class MediaGroupMiddleware(BaseMiddleware):
 
 
 # @dp.message_handler(is_media_group=True, content_types=types.ContentType.ANY)
-# async def handle_albums(message: types.Message, album: List[types.Message]):
+# async def handle_albums(message: types.Msg, album: List[types.Msg]):
 #     """This handler will receive a complete album of any type."""
 #     media_group = types.MediaGroup()
 #     for obj in album:

@@ -8,7 +8,7 @@ from operator import attrgetter, itemgetter
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton as B
 # from aiogram.utils.parts import paginate
 
-from .models import Message, Chat
+from .models import Msg, MsgSettings, Chat, UserFilter
 
 
 def inline_markup(func):
@@ -56,7 +56,7 @@ def main():
         [B(_('✉️ Messages'), callback_data='messages')],
         [B(_('🤖 Accounts'), callback_data='accounts')],
         # [B(_('Groups'), callback_data='groups')],
-        [BACK_BTN]
+        # [BACK_BTN]
     ]
 
 
@@ -70,16 +70,37 @@ def messages():
 
 
 @inline_markup
-def message_detail(msg: Message=None):
+def message_detail(msg: Msg=None):
     return [
         [B(_('▶️ Start task'), callback_data='start')],
+        [B(_('⚙️ Settings'), callback_data='settings')],
         [B(_('🧾 Stats'), callback_data='stats')],
-        [B(_('🎫 Filters'), callback_data='filters')],
+        # [B(_('🎫 Filters'), callback_data='filters')],
         [B(_('📋 Edit text'), callback_data='edit_text')],
         [B(_('📷 Edit media'), callback_data='edit_media')],
         [B(_('🚫 Delete'), callback_data='delete')],
         [BACK_BTN]
     ]
+
+
+@inline_markup
+def message_settings():
+    return [
+        [B(_('📶 Daily limit'), callback_data='limit')],
+        [B(_('🎫 User filters'), callback_data='filters')],
+        [BACK_BTN]
+    ]
+
+
+@inline_markup
+def filters(settings):
+    res = []
+    filters = settings.user_filters
+    for item in UserFilter:
+        emoji = '✅' if item in filters else '🟩'
+        res.append([B('{} {}'.format(item.get_name(), emoji), callback_data=item.name)])
+    res.append([BACK_BTN])
+    return res
 
 
 # @inline_markup
@@ -94,6 +115,7 @@ def accounts():
     return [
         [B(_('🗂 My accounts'), callback_data='list')],
         [B(_('💾 Upload'), callback_data='upload')],
+        [BACK_BTN]
     ]
 
 
@@ -124,7 +146,7 @@ async def paginate_queryset(queryset,  page=1, per_page=15):
 
 @inline_markup
 async def messages_list(page=0):
-    queryset = Message.all().only('id', 'name')
+    queryset = Msg.all().only('id', 'name')
     items, paginated = await paginate_queryset(queryset, page=page)
     keyboard = [[B(item.name, callback_data=str(item.id))] for item in items]
     if paginated:
