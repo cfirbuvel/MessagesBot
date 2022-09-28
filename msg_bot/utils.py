@@ -41,6 +41,7 @@ async def session_file_to_string(filepath):
         row = await c.fetchone()
         row_len = len(row)
         if row_len:
+            print('UPLOAD SESSION:')
             print(row)
             if row_len == 6:
                 dc_id, test_mode, auth_key, date, user_id, is_bot = row
@@ -52,6 +53,8 @@ async def session_file_to_string(filepath):
                 # self._server_adderss = ipaddress.ip_address(ip).compressed
                 # self._loaded = True
                 # conn.close()
+            else:
+                return
             user_id = user_id or 999999999
             is_bot = is_bot or 0
             return base64.urlsafe_b64encode(struct.pack(">B?256sI?", dc_id, test_mode, auth_key, int(user_id), int(is_bot),)).decode().rstrip("=")

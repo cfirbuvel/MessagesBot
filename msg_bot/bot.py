@@ -12,8 +12,6 @@ from . import settings
 from .middlewares import MediaGroupMiddleware
 
 
-lock = asyncio.Lock()
-
 bot = Bot(token=settings.BOT_TOKEN, parse_mode=ParseMode.HTML)
 dispatcher = Dispatcher(bot, storage=MemoryStorage())  # TODO: Use RedisStorage
 dispatcher.middleware.setup(MediaGroupMiddleware())

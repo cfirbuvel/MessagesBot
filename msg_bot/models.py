@@ -1,4 +1,5 @@
 import asyncio
+import datetime
 import enum
 import functools
 from gettext import gettext as _
@@ -22,7 +23,6 @@ class Acc(models.Model):
     #     return random.randint(45, 50)
 
     class Status(enum.IntEnum):
-        OFFLINE = 0
         ACTIVE = 1
         NOT_AUTHED = 2
         BANNED = 3
@@ -33,6 +33,7 @@ class Acc(models.Model):
     system_version = fields.CharField(max_length=128, null=True)
     lang = fields.CharField(max_length=8, null=True)
     status = fields.IntEnumField(Status, default=Status.ACTIVE)  #
+    users = fields.ManyToManyField('models.User', related_name='accounts', through='sent_msg')
 
     # invites = fields.IntField(default=generate_invites_num)
     # invites_reset_at = fields.DatetimeField(null=True)
@@ -58,13 +59,21 @@ class UserFilter(enum.Enum):
         }
         return mapping[self]
 
-    async def apply(self, user: PyroUser):
+    @classmethod
+    @property
+    def names(cls):
+        return [f.name for f in cls]
+
+    def apply(self, user: PyroUser):
         method = getattr(self, 'filter_{}'.format(self.name.lower()))
-        return await method(user)
+        return method(user)
 
     def filter_recent(self, user: PyroUser):
         if user.status == UserStatus.OFFLINE:
-            today = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            # print('USER: ', user.username or get_full_name(user))
+            # print('TODAY: ', today)
+            # print('LAST ONLINE: ', user.last_online_date)
+            today = datetime.datetime.today()
             return (today - user.last_online_date).days < 7
         return user.status in (UserStatus.ONLINE, UserStatus.RECENTLY, UserStatus.LAST_WEEK)
 
@@ -84,8 +93,8 @@ class MsgSettings(models.Model):
 
     def get_msg(self):
         filters = ', '.join(f.get_name() for f in self.user_filters)
-        return _('Daily limit: {}\n'
-                 'User filters: {}').format(self.limit, filters)
+        return _('Daily limit: <i>{}</i>\n'
+                 'User filters: <i>{}</i>').format(self.limit, filters or 'Any user')
 
 
 class Msg(models.Model):
@@ -94,12 +103,12 @@ class Msg(models.Model):
     settings = fields.OneToOneField('models.MsgSettings', related_name='msg', on_delete=fields.RESTRICT)
     created_at = fields.DatetimeField(default=timezone.now)
     edited_at = fields.DatetimeField(default=timezone.now)
-    users = fields.ManyToManyField('models.User', related_name='messages', through='sent_msg')
+    # users = fields.ManyToManyField('models.User', related_name='messages', through='sent_msg')
 
     media: fields.ReverseRelation['MsgMedia']
 
     async def has_content(self):
-        return bool(self.text) or await self.media.exists()
+        return bool(self.text or await self.get_media())
 
     async def get_media(self):
         res = self.media.all()
@@ -108,6 +117,9 @@ class Msg(models.Model):
             if count == 1:
                 res = res.first()
             return await res
+
+    def __str__(self):
+        return self.name
 
     class Meta:
         ordering = ['-edited_at']
@@ -145,7 +157,7 @@ class AbstractMedia(models.Model):
     type = fields.CharEnumField(MediaType)
     # file_unique_id = fields.CharField(max_length=128)
     file_id = fields.CharField(max_length=256)
-    filepath = fields.CharField(max_length=4096, unique=True)
+    filepath = fields.CharField(max_length=4096, unique=True, null=True)
     order = fields.IntField(default=0)
 
     # def get_input_media(self, upload=True):
@@ -168,13 +180,24 @@ class MsgMedia(AbstractMedia):
 
 
 class SentMsg(models.Model):
-    msg = fields.ForeignKeyField('models.Msg', related_name='sent_messages', on_delete=fields.CASCADE)
+    acc = fields.ForeignKeyField('models.Acc', related_name='sent_messages', on_delete=fields.CASCADE)
+    # msg = fields.ForeignKeyField('models.Msg', related_name='sent_messages', on_delete=fields.SET_NULL, null=True)
+    task = fields.ForeignKeyField('models.MsgTask', related_name='sent_messages', null=True, on_delete=fields.SET_NULL)
     user = fields.ForeignKeyField('models.User', related_name='sent_messages', on_delete=fields.CASCADE)
+    text = fields.CharField(max_length=4096, null=True)
     sent_at = fields.DatetimeField(auto_now_add=True)
 
     class Meta:
         table = 'sent_msg'
-        unique_together = ('msg', 'user')
+        unique_together = ('task', 'user')
+
+
+class SentMedia(AbstractMedia):
+    sent_msg = fields.ForeignKeyField('models.SentMsg', related_name='media', on_delete=fields.CASCADE)
+    filepath = fields.CharField(max_length=4096, null=True)
+
+    class Meta:
+        ordering = ['order']
 
 
 class User(models.Model):
@@ -182,12 +205,19 @@ class User(models.Model):
     username = fields.CharField(max_length=32, null=True)
     first_name = fields.CharField(max_length=64, null=True)
     last_name = fields.CharField(max_length=64, null=True)
+    deactivated = fields.BooleanField(default=False)
+    blacklisted = fields.BooleanField(default=False)
 
     answers = fields.ReverseRelation['Answer']
-    msgs = fields.ReverseRelation[Msg]
+    accounts = fields.ReverseRelation[Acc]
     # created_at = fields.DatetimeField(auto_now_add=True)
     # updated_at = fields.DatetimeField(auto_now=True)
+    sent_messages = fields.ReverseRelation[SentMsg]
 
+    # @property
+    # def active(self):
+    #     return self.deactivated, self.blacklisted
+    #
     def name(self):
         return ' '.join(filter(None, (self.first_name, self.last_name))) or None
 
@@ -241,6 +271,9 @@ class MsgTask(models.Model):
     finished_at = fields.DatetimeField(null=True)
     error = fields.CharField(max_length=512, null=True)
     # msg_id = fields.IntField(null=True)  # Runtime statistics bot msg
+
+    def __str__(self):
+        return str(self.id)
 
 
 class Chat(models.Model):

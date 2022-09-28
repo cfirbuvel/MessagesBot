@@ -14,6 +14,7 @@ import watchfiles
 from msg_bot import settings
 from msg_bot.handlers import *
 from msg_bot.models import init_db
+from msg_bot.tasks import acc_dispatcher
 
 
 logging.config.dictConfig(settings.LOGGING)
@@ -51,6 +52,7 @@ logging.config.dictConfig(settings.LOGGING)
 
 async def on_startup(dispatcher):
     await init_db()
+    task = asyncio.create_task(acc_dispatcher())
 
 
 async def on_shutdown(dispatcher):

@@ -95,7 +95,7 @@ async def message_detail(update: Union[Message, CallbackQuery], state: FSMContex
             if type(media) == list:
                 media_group = []
                 for item in media:
-                    input_class = item.bot_input_class
+                    input_class = item.type.bot_input_class
                     if not item.order:
                         item = input_class(item.file_id, **kwargs)
                     else:
@@ -131,7 +131,7 @@ async def message_detail(update: Union[Message, CallbackQuery], state: FSMContex
         if type(update) == CallbackQuery:
             await update.answer()
     else:
-        return dict(msg.name, reply_markup=keyboards.message_detail())
+        return dict(text=msg.name, reply_markup=keyboards.message_detail())
 
 
 

@@ -23,7 +23,7 @@ from tortoise.transactions import in_transaction
 from . import keyboards, settings, states
 from .bot import dispatcher as dp
 from .models import Acc, MediaType, Msg, MsgMedia, MsgTask, Chat, MsgSettings, UserFilter
-from .tasks import send_message
+# from .tasks import send_message
 from .utils import get_device_info, session_file_to_string
 # from .states import Main, Messages, messages
 
@@ -183,13 +183,13 @@ async def task_group(update: Union[types.Message, types.CallbackQuery], state: F
     msg = await Msg.get(id=user_data['msg_id'])
     await MsgTask.filter(status=MsgTask.Status.ACTIVE).update(status=MsgTask.Status.CANCELED)
     msg_settings = await msg.settings
-    task_settings = await MsgSettings.create(filters=msg_settings.filters, delay=msg_settings.delay)
+    task_settings = await MsgSettings.create(filters=msg_settings.filters, limit=msg_settings.limit)
 
-    task = await MsgTask.create(chat=chat, message=msg)
+    task = await MsgTask.create(chat=chat, msg=msg, settings=task_settings)
     # await task.filters.add(await UsersFilter.get(name=UsersFilter.Type.RECENT))
-    task_name = 'send_message'
-    task = asyncio.create_task(send_message(task), name=task_name)
-    await state.update_data(msgs_task=task_name)
+    # task_name = 'send_message'
+    # task = asyncio.create_task(send_message(task), name=task_name)
+    # await state.update_data(msgs_task=task_name)
     if is_query:
         await message.edit_text(_('Task started!'))
     else:
@@ -209,7 +209,8 @@ async def message_settings(query: types.CallbackQuery, state: FSMContext):
 @dp.callback_query_handler(Text('limit'), state=states.Messages.settings)
 async def msg_limit(query: types.CallbackQuery, state: FSMContext):
     await states.MsgSettings.limit.set()
-    msg = _('Please enter the number of messages to send daily.')  # Enter 0 to set no limit.
+    msg = _('Please enter the number of messages to send daily.\n'
+            'Enter 0 to set no limit.')
     await query.message.edit_text(msg, reply_markup=keyboards.back())
     await query.answer()
 
@@ -224,16 +225,16 @@ async def msg_limit_entered(message: types.Message, state: FSMContext):
     else:
         await states.Messages.settings.set()
         data = await state.get_data()
-        msg = await Msg.get(id=data['msg_id'])
-        msg_settings = await msg.settings
-        msg_settings.daily_limit = max(1, val)  # TODO: 0 to disable limit
+        # msg = await Msg.get(id=data['msg_id'])
+        msg_settings = await MsgSettings.get(msg__id=data['msg_id'])
+        msg_settings.limit = val
         await msg_settings.save()
         await states.msg_settings(message, msg_settings)
 
 
 @dp.callback_query_handler(Text('back'), state=states.MsgSettings.limit)
 async def msg_limit_back(query: types.CallbackQuery, state: FSMContext):
-    await states.Msg.settings.set()
+    await states.Messages.settings.set()
     data = await state.get_data()
     msg = await Msg.get(id=data['msg_id'])
     await states.msg_settings(query, await msg.settings)
@@ -250,16 +251,16 @@ async def msg_filters(query: types.CallbackQuery, state: FSMContext):
     await query.answer()
 
 
-@dp.callback_query_handler(Regexp(r'^[A-Z_]$'), state=states.MsgSettings.filters)
+@dp.callback_query_handler(Text(UserFilter.names), state=states.MsgSettings.filters)
 async def msg_filters_toggle(query: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
     msg = await Msg.get(id=data['msg_id'])
     msg_settings = await msg.settings
     val = UserFilter[query.data].value
     filters = msg_settings.filters
-    if val in filters:
+    try:
         filters.remove(val)
-    else:
+    except ValueError:
         filters.append(val)
     await msg_settings.save()
     reply_markup = keyboards.filters(msg_settings)
@@ -269,7 +270,7 @@ async def msg_filters_toggle(query: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query_handler(Text('back'), state=states.MsgSettings.filters)
 async def msg_filters_back(query: types.CallbackQuery, state: FSMContext):
-    await states.Msg.settings.set()
+    await states.Messages.settings.set()
     data = await state.get_data()
     msg = await Msg.get(id=data['msg_id'])
     await states.msg_settings(query, await msg.settings)
@@ -283,8 +284,7 @@ async def msg_settings_back(query: types.CallbackQuery, state: FSMContext):
 @dp.callback_query_handler(Text('edit_text'), state=states.Messages.detail)
 async def message_text(query: types.CallbackQuery, state: FSMContext):
     await states.Messages.edit_text.set()
-    async with state.proxy() as data:
-        del data['msg_preview']
+    await delete_msg_preview(state)
     msg = ('Please, enter message text. You can include markdown.\n\n'
            'Msg will start with "Hello {username}!" by default.\n'
            'To change it, add <code>{username}</code> anywhere in the text.')
@@ -316,8 +316,7 @@ async def message_text_back(query: types.CallbackQuery, state: FSMContext):
 @dp.callback_query_handler(Text('edit_media'), state=states.Messages.detail)
 async def message_media(query: types.CallbackQuery, state: FSMContext):
     await states.Messages.edit_media.set()
-    async with state.proxy() as data:
-        del data['msg_preview']
+    await delete_msg_preview(state)
     msg = _('Please send single photo or video, or multiple as media group.')
     await query.message.edit_text(msg, reply_markup=keyboards.back())
     await query.answer()
@@ -349,7 +348,7 @@ async def message_media(message: types.Message, state: FSMContext):
         filepath = settings.MEDIA_ROOT / msg.name / (file_id + os.path.splitext(file.file_path)[1])
         await file.download(timeout=3000, destination_file=filepath)
         objects.append(MsgMedia(
-            message=msg,
+            msg=msg,
             type=content_type,
             file_id=file_id,
             filepath=filepath.absolute(),
@@ -433,10 +432,13 @@ async def upload_accounts_files(message: types.Message, state: FSMContext):
             sessions[name] = file_path
     created = 0
     exist = 0
+    invalid = 0
     for i, data in enumerate(sessions.items()):
         name, filepath = data
         session = await session_file_to_string(filepath)
-        if not await Acc.filter(name=name).exists():
+        if not session:
+            invalid += 1
+        elif not await Acc.filter(name=name).exists():
             device, system = get_device_info()
             await Acc.create(
                 name=name,
@@ -451,6 +453,8 @@ async def upload_accounts_files(message: types.Message, state: FSMContext):
     msg = '{} accounts exists been created.'.format(created)
     if exist:
         msg += '\n<i>{} accounts already exist.</i>'.format(exist)
+    if invalid:
+        msg += '\n<i>{} sessions are not valid.</i>'.format(invalid)
     await message.answer(msg)
     shutil.rmtree(temp_dir)
     await states.Main.accounts.set()
