@@ -12,8 +12,7 @@ from faker import Faker
 from pyrogram import Client
 from pyrogram.enums import ChatType, ChatMembersFilter, UserStatus, ParseMode
 from pyrogram.errors import (AuthKeyUnregistered, ChannelPublicGroupNa, ChannelInvalid, UserChannelsTooMuch,
-                             UserDeactivatedBan,
-                             UsernameOccupied)
+                             UserDeactivatedBan, UsernameOccupied, PeerFlood)
 from pyrogram.types import InputMediaPhoto, InputMediaAnimation, InputMediaVideo
 # from pyrogram.raw import functions
 from tortoise import timezone
@@ -89,7 +88,7 @@ async def acc_dispatcher():
         await msg_task.fetch_related('msg', 'chat', 'settings')
         task_settings = msg_task.settings
         limit = task_settings.limit
-        limit = math.ceil(limit / 47)
+        limit = math.ceil(limit / 43)
         # chat_id = chat_instance.identifier
         lock = asyncio.Lock()
         tasks = []
@@ -205,8 +204,9 @@ async def send_messages(client: Client, acc: Acc, task: MsgTask, lock: asyncio.L
     chat = task.chat
     task_settings = task.settings
     filters = task_settings.user_filters
+    acc_name = acc.name
     media = await msg.get_media()
-    limit = random.randint(45, 50) - acc.sent_today
+    limit = random.randint(40, 45) - acc.sent_today
     while True:
         async for member in client.get_chat_members(chat.chat_id):
             user = member.user
@@ -250,20 +250,21 @@ async def send_messages(client: Client, acc: Acc, task: MsgTask, lock: asyncio.L
                                 media_group.append(item.type.acc_input_class(item.filepath, **kwargs))
                                 if kwargs:
                                     kwargs = {}
-                            messages = await client.send_media_group(user_id, media_group)
-                            print('MEDIA GROUP SENT TO:', user.username or get_full_name(user))
-                            # for m in messages:
-                            #     print(m)
+                            method = 'send_media_group'
+                            args = [user_id, media_group]
                         else:
-                            method = getattr(client, 'send_{}'.format(media.type.value))
-                            # print(method)
-                            message = await method(user_id, media.filepath, **kwargs)
-                            # message = await client.send_photo(user_id, media.filepath, caption=text, parse_mode=ParseMode.MARKDOWN)
-                            print('{} SENT'.format(media.type))
-                            # print(message)
+                            method = 'send_{}'.format(media.type.value)
+                            args = [user_id, media.filepath]
                     else:
-                        message = await client.send_message(user_id, text, **kwargs)
-                        print('MESSAGE SENT')
+                        method = 'send_message'
+                        args = [user_id, text]
+                    try:
+                        res = await getattr(client, method)(*args, **kwargs)
+                    except PeerFlood:
+                        # TODO: Limit per acc in settings
+                        logger.warning('Account %s PeerFlood.', acc_name)
+                        break
+                    logger.info('Msg sent from %s to %s', acc_name, user.username or get_full_name(user))
                     # users.append(user_id)
                     # acc.invites -= 1
                     sent_msg = await SentMsg.create(acc=acc, task=task, user=user_obj, text=msg.text)
@@ -271,13 +272,15 @@ async def send_messages(client: Client, acc: Acc, task: MsgTask, lock: asyncio.L
                         await SentMedia.create(sent_msg=sent_msg, type=item.type, file_id=item.file_id, filepath=item.filepath, order=i)
                 limit -= 1
                 if not limit:
-                    print('ACC LIMIT EXHAUSTED')
-                    await asyncio.sleep(3600 * 24)
+                    logger.info('Acc %s limit reached.', acc_name)
                     break
                 await relative_sleep(120)
-        task.status = MsgTask.Status.FINISHED
-        await task.save()
-        break
+        else:
+            task.status = MsgTask.Status.FINISHED
+            await task.save()
+            return
+        logger.info('Acc %s sleeping for 24 hours.', acc.name)
+        await asyncio.sleep(3600 * 24)
 
 
 async def client_task(client, acc, task, lock):

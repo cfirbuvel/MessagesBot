@@ -46,8 +46,8 @@ async def delete_msg_preview(state):
 
 
 @dp.message_handler(commands=['start'], state='*')
-async def start(message: types.Message):
-    await states.main(message)
+async def start(message: types.Message, state: FSMContext):
+    await states.main(message, state)
 
 
 @dp.callback_query_handler(Text('messages'), state=(states.Main.main, None))
@@ -59,7 +59,7 @@ async def messages(query: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query_handler(Text('back'), state=states.Main.messages)
 async def messages_back(query: types.CallbackQuery, state: FSMContext):
-    await states.main(query)
+    await states.main(query, state)
 
 
 @dp.callback_query_handler(Text('list'), state=states.Main.messages)
@@ -189,21 +189,46 @@ async def task_group(update: Union[types.Message, types.CallbackQuery], state: F
         await message.edit_text(_('Task started!'))
     else:
         await message.reply(_('Task started!'))
-    await states.main(update)
+    await states.main(update, state)
 
 
-@dp.callback_query_handler(Regexp(r'^task|\d+$'), state=(states.Messages.detail, states.Main.main, None))
+@dp.callback_query_handler(Text('task'), state=(states.Messages.detail, states.Main.main, None))
 async def task_detail(query: types.CallbackQuery, state: FSMContext):
     await states.Task.detail.set()
     await delete_msg_preview(state)
-    task_id = int(query.data.split('|')[1])
-    task = await MsgTask.get(id=task_id)
-    await state.update_data(task_id=task_id)
+    data = await state.get_data()
+    task = await MsgTask.get(id=data['task_id'])
     msg = await task.get_details_msg()
     await query.message.edit_text(msg, reply_markup=keyboards.task_detail(), disable_web_page_preview=True)
     await query.answer()
 
-#TODO: Task detail handlers
+
+# TODO: cancel handler
+@dp.callback_query_handler(Text('cancel'), state=states.Task.detail)
+async def cancel_task(query: types.CallbackQuery, state: FSMContext):
+    await states.Task.cancel.set()
+    msg = _('Are you sure?')
+    await query.message.edit_text(msg, reply_markup=keyboards.yes_no())
+    await query.answer()
+
+
+# @dp.callback_query_handler(Text(['yes', 'no']), state=states.Task.cancel)
+# async def cancel_task_confirm(query: types.CallbackQuery, state: FSMContext):
+#     if query.data == 'yes':
+#         data = await state.get_data()
+#         task = await MsgTask.get(id=data['task_id'])
+#         await task.cancel()
+#         msg = _('Task canceled.')
+#     else:
+#         msg = _('Task not canceled.')
+#     await query.message.edit_text(msg, reply_markup=keyboards.task_detail())
+#     await query.answer()
+
+@dp.callback_query_handler(Text('back'), state=states.Task.detail)
+async def task_detail_back(query: types.CallbackQuery, state: FSMContext):
+    async with state.proxy() as data:
+        del data['task_id']
+    await states.message_detail(query, state)
 
 
 @dp.callback_query_handler(Text('settings'), state=states.Messages.detail)
@@ -381,7 +406,7 @@ async def message_detail_back(query: types.CallbackQuery, state: FSMContext):
     await states.Messages.list.set()
     data = await state.get_data()
     # TODO: add indicator if message is sending right now
-    reply_markup = await keyboards.messages_list(data['page'])
+    reply_markup = await keyboards.messages_list(data.get('page', 0))
     await query.message.edit_text(_('My messages'), reply_markup=reply_markup)
     await query.answer()
 
@@ -476,4 +501,4 @@ async def upload_accounts_files(message: types.Message, state: FSMContext):
 
 @dp.callback_query_handler(Text('back'), state=states.Main.accounts)
 async def accounts_back(query: types.CallbackQuery, state: FSMContext):
-    await states.main(query)
+    await states.main(query, state)

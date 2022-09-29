@@ -5,6 +5,7 @@ from typing import Union
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.types import Message, CallbackQuery, ParseMode
+from tortoise.exceptions import DoesNotExist
 
 from . import keyboards
 from .models import Msg, Chat, MsgMedia, MsgTask
@@ -63,13 +64,14 @@ def update_handler(reply=False):
 
 
 @update_handler()
-async def main(update: Union[Message, CallbackQuery]):
+async def main(update: Union[Message, CallbackQuery], state: FSMContext):
     await Main.main.set()
     msg = _('Welcome to <b>MsgBot</b>!')
     task = await MsgTask.all().first()
     if task:
+        await state.update_data(task_id=task.id, msg_id=(await task.msg).id)
         msg += '\n\n' + await task.get_status_msg()
-    return dict(text=msg, reply_markup=keyboards.main(task=task))
+    return dict(text=msg, reply_markup=keyboards.main(True))
 
 
 @update_handler()
@@ -91,10 +93,13 @@ async def message_detail(update: Union[Message, CallbackQuery], state: FSMContex
     if not msg:
         data = await state.get_data()
         msg = await Msg.get(id=data['msg_id'])
-    task = await MsgTask.all().first()
+    task = await MsgTask.filter(status=MsgTask.Status.ACTIVE).first()
     if task:
+        has_task = True
+        await state.update_data(task_id=task.id)
         detail_msg = await task.get_status_msg()
     else:
+        has_task = False
         detail_msg = msg.name
     if await msg.has_content():
         text = msg.text
@@ -139,11 +144,11 @@ async def message_detail(update: Union[Message, CallbackQuery], state: FSMContex
         else:
             preview.append(res.message_id)
         await state.update_data(msg_preview=preview)
-        await message.answer(detail_msg, reply_markup=keyboards.message_detail(task))
+        await message.answer(detail_msg, reply_markup=keyboards.message_detail(has_task))
         if type(update) == CallbackQuery:
             await update.answer()
     else:
-        return dict(text=detail_msg, reply_markup=keyboards.message_detail(task))
+        return dict(text=detail_msg, reply_markup=keyboards.message_detail(has_task))
 
 
 

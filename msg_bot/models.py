@@ -106,6 +106,7 @@ class Msg(models.Model):
     # users = fields.ManyToManyField('models.User', related_name='messages', through='sent_msg')
 
     media: fields.ReverseRelation['MsgMedia']
+    task: fields.ReverseRelation['MsgTask']
 
     async def has_content(self):
         return bool(self.text or await self.get_media())

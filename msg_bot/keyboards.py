@@ -51,15 +51,15 @@ BACK_BTN = B(_('🠈 Back'), callback_data='back')  # 🔙↩️◀️🡄🢀�
 
 
 @inline_markup
-def main(task=None):
+def main(has_task=False):
     rows = [
         [B(_('✉️ Messages'), callback_data='messages')],
         [B(_('🤖 Accounts'), callback_data='accounts')],
         # [B(_('Groups'), callback_data='groups')],
         # [BACK_BTN]
     ]
-    if task:
-        rows.insert(0, [B(_('📝 Task details'), callback_data='task|{}'.format(task.id))])
+    if has_task:
+        rows.insert(0, [B(_('📝 Task details'), callback_data='task')])
     return rows
 
 
@@ -73,13 +73,13 @@ def messages():
 
 
 @inline_markup
-def message_detail(task=None):
-    if task:
-        task_btn = [B(_('📝 Task details'), callback_data='task|{}'.format(task.id))]
+def message_detail(has_task=False):
+    if has_task:
+        task_btn = B(_('📝 Task details'), callback_data='task')
     else:
-        task_btn = [B(_('▶️ Start task'), callback_data='start')],
+        task_btn = B(_('▶️ Start task'), callback_data='start')
     return [
-        task_btn,
+        [task_btn],
         [B(_('⚙️ Settings'), callback_data='settings')],
         [B(_('🧾 Stats'), callback_data='stats')],
         # [B(_('🎫 Filters'), callback_data='filters')],
@@ -138,6 +138,13 @@ def accounts():
 def back():
     return [
         [BACK_BTN]
+    ]
+
+
+@inline_markup
+def yes_no():
+    return [
+        [B(_('✔️ Yes'), callback_data='yes'), B(_('✖️ No'), callback_data='no')]
     ]
 
 
