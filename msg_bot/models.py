@@ -272,8 +272,47 @@ class MsgTask(models.Model):
     error = fields.CharField(max_length=512, null=True)
     # msg_id = fields.IntField(null=True)  # Runtime statistics bot msg
 
+    sent_messages: fields.ReverseRelation[SentMsg]
+
+    async def get_status_msg(self):
+        msg = await self.msg
+        status_map = {
+            self.Status.ACTIVE: _('🔥 {} is running.'),
+            self.Status.FINISHED: _('✅ {} has finished.'),
+            self.Status.FAILED: _('❌ {} has failed.'),
+            self.Status.CANCELED: _('🛑 {} has been canceled.'),
+        }
+        return status_map[self.status].format('<i>{}</i> task'.format(msg.name))
+
+    async def get_details_msg(self):
+        await self.fetch_related('msg', 'chat', 'settings', 'accounts')
+        msg = self.msg
+        chat = self.chat
+        settings = self.settings
+        status = self.status.name.capitalize()
+        num_accs = await self.accounts.all().count()
+        num_msgs = await self.sent_messages.all().count()
+        task_text = _('<b><i>{}</i> task</b>:\n'
+                      'Status: {}\n'
+                      'Accounts: {}\n'
+                      'Sent messages: {}').format(msg.name, status, num_accs, num_msgs)
+        chat_text = _('<b><a href="{}">Chat</a></b>').format(chat.link)
+        if chat.name:
+            chat_text += '\n' + _('Title: {}').format(chat.name)
+        if chat.num_users:
+            chat_text += '\n' + _('Members: {}').format(chat.num_users)
+        if self.finished_at:
+            time_text = _('Finished at: {}').format(self.finished_at.strftime('%d.%m.%Y %H:%M:%S'))
+        else:
+            run_time = str(timezone.now() - self.started_at).split('.')[0]
+            time_text = _('Running for {}').format(run_time)
+        return '\n\n'.join([task_text, chat_text, settings.get_msg(), time_text])
+
     def __str__(self):
         return str(self.id)
+
+    class Meta:
+        ordering = ['-started_at']
 
 
 class Chat(models.Model):

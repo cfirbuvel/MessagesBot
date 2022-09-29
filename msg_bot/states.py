@@ -7,7 +7,7 @@ from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.types import Message, CallbackQuery, ParseMode
 
 from . import keyboards
-from .models import Msg, Chat, MsgMedia
+from .models import Msg, Chat, MsgMedia, MsgTask
 
 
 class Main(StatesGroup):
@@ -29,10 +29,14 @@ class Messages(StatesGroup):
     delete = State()
 
 
+class Task(StatesGroup):
+    detail = State()
+    cancel = State()
+
+
 class MsgSettings(StatesGroup):
     limit = State()
     filters = State()
-
 
 class Accounts(StatesGroup):
     list = State()
@@ -59,10 +63,13 @@ def update_handler(reply=False):
 
 
 @update_handler()
-async def enter_menu(update=Union[Message, CallbackQuery]):
+async def main(update: Union[Message, CallbackQuery]):
     await Main.main.set()
     msg = _('Welcome to <b>MsgBot</b>!')
-    return dict(text=msg, reply_markup=keyboards.main())
+    task = await MsgTask.all().first()
+    if task:
+        msg += '\n\n' + await task.get_status_msg()
+    return dict(text=msg, reply_markup=keyboards.main(task=task))
 
 
 @update_handler()
@@ -84,6 +91,11 @@ async def message_detail(update: Union[Message, CallbackQuery], state: FSMContex
     if not msg:
         data = await state.get_data()
         msg = await Msg.get(id=data['msg_id'])
+    task = await MsgTask.all().first()
+    if task:
+        detail_msg = await task.get_status_msg()
+    else:
+        detail_msg = msg.name
     if await msg.has_content():
         text = msg.text
         media = await msg.get_media()
@@ -127,11 +139,11 @@ async def message_detail(update: Union[Message, CallbackQuery], state: FSMContex
         else:
             preview.append(res.message_id)
         await state.update_data(msg_preview=preview)
-        await message.answer(msg.name, reply_markup=keyboards.message_detail())
+        await message.answer(detail_msg, reply_markup=keyboards.message_detail(task))
         if type(update) == CallbackQuery:
             await update.answer()
     else:
-        return dict(text=msg.name, reply_markup=keyboards.message_detail())
+        return dict(text=detail_msg, reply_markup=keyboards.message_detail(task))
 
 
 

@@ -1,5 +1,6 @@
 import base64
 from contextlib import asynccontextmanager
+from gettext import gettext as _
 import random
 import struct
 
@@ -7,17 +8,18 @@ import aiosqlite
 from faker import Faker
 from pyrogram import Client
 from pyrogram.types import Message
+from tortoise import timezone
 # from tortoise import Tortoise
 
-from . import settings
+from .settings import API_ID, API_HASH
 
 
 @asynccontextmanager
 async def tg_client(name, device_model, system_version, session_string=None):
     client = Client(
         name,
-        settings.API_ID,
-        settings.API_HASH,
+        API_ID,
+        API_HASH,
         app_version='1.0',
         device_model=device_model,
         system_version=system_version,

@@ -51,13 +51,16 @@ BACK_BTN = B(_('🠈 Back'), callback_data='back')  # 🔙↩️◀️🡄🢀�
 
 
 @inline_markup
-def main():
-    return [
+def main(task=None):
+    rows = [
         [B(_('✉️ Messages'), callback_data='messages')],
         [B(_('🤖 Accounts'), callback_data='accounts')],
         # [B(_('Groups'), callback_data='groups')],
         # [BACK_BTN]
     ]
+    if task:
+        rows.insert(0, [B(_('📝 Task details'), callback_data='task|{}'.format(task.id))])
+    return rows
 
 
 @inline_markup
@@ -70,15 +73,27 @@ def messages():
 
 
 @inline_markup
-def message_detail(msg: Msg=None):
+def message_detail(task=None):
+    if task:
+        task_btn = [B(_('📝 Task details'), callback_data='task|{}'.format(task.id))]
+    else:
+        task_btn = [B(_('▶️ Start task'), callback_data='start')],
     return [
-        [B(_('▶️ Start task'), callback_data='start')],
+        task_btn,
         [B(_('⚙️ Settings'), callback_data='settings')],
         [B(_('🧾 Stats'), callback_data='stats')],
         # [B(_('🎫 Filters'), callback_data='filters')],
         [B(_('📋 Edit text'), callback_data='edit_text')],
         [B(_('📷 Edit media'), callback_data='edit_media')],
         [B(_('🚫 Delete'), callback_data='delete')],
+        [BACK_BTN]
+    ]
+
+
+@inline_markup
+def task_detail():
+    return [
+        [B(_('🚫 Cancel'), callback_data='cancel')],
         [BACK_BTN]
     ]
 

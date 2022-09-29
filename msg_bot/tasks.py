@@ -58,81 +58,90 @@ def safe_client(func):
     return wrapper
 
 
+async def task_logger(task):
+    # while True:
+    #     logger.info(f'Task {task} status: {task.status}')
+    #     await asyncio.sleep(10)
+    pass
+
+
 # Dispatcher is needed to be base for tasks, otherwise they will be garbage collected?
 async def acc_dispatcher():
-    watch_tasks = []
-    msg_tasks = []
+    # watch_tasks = []
+    # msg_tasks = []
     while True:
+        #     msg_task = None
+        #     accounts = await queryset.filter(Q(users__blacklisted=await asyncio.sleep(3600 * 24)False) | Q(users__deactivated=False)).prefetch_related('users')
+            # if msg_task:
+        # watchers = await queryset.filter(Q(users__blacklisted=False) | Q(users__deactivated=False)).prefetch_related('users')
         queryset = Acc.filter(status=Acc.Status.ACTIVE)
         # TODO: Check if OFFLINE/ACTIVE is needed
         try:
             msg_task = await MsgTask.get(status=MsgTask.Status.ACTIVE)
-            today = timezone.now() - datetime.timedelta(hours=24)
-            accounts = await queryset.annotate(sent_today=Count('sent_messages', _filter=Q(sent_messages__sent_at__gte=today))).order_by('sent_today')
-            print('Got task: ', msg_task)
         except DoesNotExist:
             await asyncio.sleep(10)
             continue
-        #     msg_task = None
-        #     accounts = await queryset.filter(Q(users__blacklisted=False) | Q(users__deactivated=False)).prefetch_related('users')
-            # if msg_task:
-        # watchers = await queryset.filter(Q(users__blacklisted=False) | Q(users__deactivated=False)).prefetch_related('users')
+        print('Got task: ', msg_task)
+        today = timezone.now() - datetime.timedelta(hours=24)
+        accounts = await queryset.annotate(
+            sent_today=Count('sent_messages', _filter=Q(sent_messages__sent_at__gte=today))).order_by('sent_today')
+        print('Accounts: ', len(accounts))
         await msg_task.fetch_related('msg', 'chat', 'settings')
         task_settings = msg_task.settings
         limit = task_settings.limit
-        avg_msgs = 47
+        limit = math.ceil(limit / 47)
         # chat_id = chat_instance.identifier
         lock = asyncio.Lock()
         tasks = []
-        first = True
-        for acc in iter(accounts):
-            client = Client(
-                acc.name,
-                API_ID,
-                API_HASH,
-                app_version='1.0',
-                device_model=acc.device_model,
-                system_version=acc.system_version,
-                session_string=acc.session,
-                in_memory=True
-            )
-            authed = await client.connect()
-            if not authed:
-                logger.info(f'Acc {acc.name} auth failed.')
-                acc.status = Acc.Status.NOT_AUTHED
-                await acc.save()
-                await client.disconnect()
-                continue
-            if first:
-                client = await setup_client(client, acc, msg_task)
-                if not client:
+        while True:
+            if accounts and len(tasks) < limit:
+                acc = accounts.pop()
+                client = Client(
+                    acc.name,
+                    API_ID,
+                    API_HASH,
+                    app_version='1.0',
+                    device_model=acc.device_model,
+                    system_version=acc.system_version,
+                    session_string=acc.session,
+                    in_memory=True
+                )
+                authed = await client.connect()
+                if not authed:
+                    logger.info(f'Acc {acc.name} auth failed.')
+                    acc.status = Acc.Status.NOT_AUTHED
+                    await acc.save()
+                    await client.disconnect()
                     continue
-                chat_obj = msg_task.chat
-                count = 0
-                async for member in client.get_chat_members(chat_obj.chat_id):
-                    user = member.user
-                    if user_valid(user, task_settings.user_filters):  # and user_filter(user):
-                        count += 1
-                if not limit or count < limit:
-                    limit = count
-                chat_obj.num_users = count
-                await chat_obj.save()
-                first = False
-                msg_task = send_messages(client, acc, msg_task, lock)
+                # if first:
+                #     client = await setup_client(client, acc, msg_task)
+                #     if not client:
+                #         continue
+                #     chat_obj = msg_task.chat
+                #     count = 0
+                #     async for member in client.get_chat_members(chat_obj.chat_id):
+                #         user = member.user
+                #         if user_valid(user, task_settings.user_filters):  # and user_filter(user):
+                #             count += 1
+                #     if not limit or count < limit:
+                #         limit = count
+                #     chat_obj.num_users = count
+                #     await chat_obj.save()
+                #     first = False
+                #     msg_task = send_messages(client, acc, msg_task, lock)
+                # else:
+                tasks.append(asyncio.create_task(client_task(client, acc, msg_task, lock)))
             else:
-                msg_task = client_task(client, acc, msg_task, lock)
-            tasks.append(msg_task)
-            break
-        if len(tasks) == math.ceil(limit / avg_msgs):
-            await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-
-        # for acc in watchers:
-
-        # try:
-        #     task = await MsgTask.get(status=MsgTask.Status.ACTIVE)
-        # except DoesNotExist:
-        #     await asyncio.sleep(10)
-        #     continue
+                done, tasks = await asyncio.wait(tasks, timeout=10, return_when=asyncio.FIRST_COMPLETED)
+                await msg_task.refresh_from_db()
+                if msg_task.status != MsgTask.Status.ACTIVE:
+                    logger.warning('Task status changed: %s.', msg_task.status)
+                    async with lock:
+                        for task in tasks:
+                            task.cancel()
+                    msg_task.finished_at = timezone.now()
+                    await msg_task.save()
+                    break
 
 
 @safe_client
@@ -201,6 +210,7 @@ async def send_messages(client: Client, acc: Acc, task: MsgTask, lock: asyncio.L
     while True:
         async for member in client.get_chat_members(chat.chat_id):
             user = member.user
+            # TODO: Do not save to accounts
             if user_valid(user, filters):
                 user_id = user.id
                 username = user.username
@@ -262,14 +272,18 @@ async def send_messages(client: Client, acc: Acc, task: MsgTask, lock: asyncio.L
                 limit -= 1
                 if not limit:
                     print('ACC LIMIT EXHAUSTED')
+                    await asyncio.sleep(3600 * 24)
                     break
                 await relative_sleep(120)
-        await asyncio.sleep(3600 * 24)
+        task.status = MsgTask.Status.FINISHED
+        await task.save()
+        break
 
 
 async def client_task(client, acc, task, lock):
-    await setup_client(client, acc, task)
-    await send_messages(client, acc, task, lock)
+    client = await setup_client(client, acc, task)
+    if client:
+        await send_messages(client, acc, task, lock)
 
 
 

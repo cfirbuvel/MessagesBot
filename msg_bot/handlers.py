@@ -47,9 +47,7 @@ async def delete_msg_preview(state):
 
 @dp.message_handler(commands=['start'], state='*')
 async def start(message: types.Message):
-    await states.Main.main.set()
-    msg = _('Welcome to <b>MsgBot</b>!')
-    await message.answer(msg, reply_markup=keyboards.main())
+    await states.main(message)
 
 
 @dp.callback_query_handler(Text('messages'), state=(states.Main.main, None))
@@ -61,10 +59,7 @@ async def messages(query: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query_handler(Text('back'), state=states.Main.messages)
 async def messages_back(query: types.CallbackQuery, state: FSMContext):
-    await states.Main.main.set()
-    msg = _('Welcome to <b>MsgBot</b>!')
-    await query.message.edit_text(msg, reply_markup=keyboards.main())
-    await query.answer()
+    await states.main(query)
 
 
 @dp.callback_query_handler(Text('list'), state=states.Main.messages)
@@ -194,7 +189,21 @@ async def task_group(update: Union[types.Message, types.CallbackQuery], state: F
         await message.edit_text(_('Task started!'))
     else:
         await message.reply(_('Task started!'))
-    await states.enter_menu(update)
+    await states.main(update)
+
+
+@dp.callback_query_handler(Regexp(r'^task|\d+$'), state=(states.Messages.detail, states.Main.main, None))
+async def task_detail(query: types.CallbackQuery, state: FSMContext):
+    await states.Task.detail.set()
+    await delete_msg_preview(state)
+    task_id = int(query.data.split('|')[1])
+    task = await MsgTask.get(id=task_id)
+    await state.update_data(task_id=task_id)
+    msg = await task.get_details_msg()
+    await query.message.edit_text(msg, reply_markup=keyboards.task_detail(), disable_web_page_preview=True)
+    await query.answer()
+
+#TODO: Task detail handlers
 
 
 @dp.callback_query_handler(Text('settings'), state=states.Messages.detail)
@@ -209,8 +218,8 @@ async def message_settings(query: types.CallbackQuery, state: FSMContext):
 @dp.callback_query_handler(Text('limit'), state=states.Messages.settings)
 async def msg_limit(query: types.CallbackQuery, state: FSMContext):
     await states.MsgSettings.limit.set()
-    msg = _('Please enter the number of messages to send daily.\n'
-            'Enter 0 to set no limit.')
+    msg = _('Please enter the number of messages to send daily.')
+            # 'Enter 0 to set no limit.')
     await query.message.edit_text(msg, reply_markup=keyboards.back())
     await query.answer()
 
@@ -227,7 +236,7 @@ async def msg_limit_entered(message: types.Message, state: FSMContext):
         data = await state.get_data()
         # msg = await Msg.get(id=data['msg_id'])
         msg_settings = await MsgSettings.get(msg__id=data['msg_id'])
-        msg_settings.limit = val
+        msg_settings.limit = max(1, val)
         await msg_settings.save()
         await states.msg_settings(message, msg_settings)
 
@@ -367,12 +376,15 @@ async def message_media_back(query: types.CallbackQuery, state: FSMContext):
     await states.message_detail(query, state)
 
 
-# @dp.callback_query_handler(Text(startswith='open_msg'), state='*')
-# async def open_msg(query: types.CallbackQuery, state: FSMContext):
-#     msg_id = int(query.data.split(':')[1])
-#     msg = await Msg.get(id=msg_id)
-#     await query.message.edit_text(msg.edit_text, reply_markup=keyboards.message_detail())
-#     await query.answer()
+@dp.callback_query_handler(Text('back'), state=states.Messages.detail)
+async def message_detail_back(query: types.CallbackQuery, state: FSMContext):
+    await states.Messages.list.set()
+    data = await state.get_data()
+    # TODO: add indicator if message is sending right now
+    reply_markup = await keyboards.messages_list(data['page'])
+    await query.message.edit_text(_('My messages'), reply_markup=reply_markup)
+    await query.answer()
+
 
 @dp.callback_query_handler(Text('accounts'), state=(states.Main.main, None))
 async def accounts(query: types.CallbackQuery, state: FSMContext):
@@ -464,4 +476,4 @@ async def upload_accounts_files(message: types.Message, state: FSMContext):
 
 @dp.callback_query_handler(Text('back'), state=states.Main.accounts)
 async def accounts_back(query: types.CallbackQuery, state: FSMContext):
-    await states.enter_menu(query)
+    await states.main(query)
