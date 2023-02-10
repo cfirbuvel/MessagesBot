@@ -7,12 +7,11 @@ BASE_DIR = Path(__file__).parent.parent
 MONGO_URL = 'mongodb+srv://stone:Nh6nSKLwAR4LU2kY@dev.qewbp.mongodb.net/?retryWrites=true&w=majority'
 MONGO_DATABASE = 'tg_spam'
 
-# API_ID = 2950611  # int
-# API_HASH = '34895cc8af8345e4bb3cf581d18a57b4'
+
 
 API_ID = 15309611  # AppRobo account
 API_HASH = 'b3eea2c3ad5e3b5bb458d6615d8ab7b5'
-BOT_TOKEN = '5202972681:AAFOmdJoa0ymBA2c6NQb0uUJaVBfRvFHi8Y'
+BOT_TOKEN = '497415901:AAGOGyJ5BqPBUe9zycr355vg98aSFBvV2jI'
 
 # APP_VERSION = '1.0'
 

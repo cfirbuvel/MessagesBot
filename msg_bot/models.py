@@ -17,7 +17,6 @@ from .utils import get_full_name
 
 
 class Acc(models.Model):
-
     # @staticmethod
     # def generate_invites_num():
     #     return random.randint(45, 50)
@@ -83,7 +82,6 @@ class UserFilter(enum.Enum):
 
 
 class MsgSettings(models.Model):
-
     filters = fields.JSONField(default=list)
     limit = fields.IntField(default=1000)
 
@@ -255,7 +253,6 @@ class AnswerMedia(AbstractMedia):
 
 
 class MsgTask(models.Model):
-
     class Status(enum.IntEnum):
         ACTIVE = 0
         FINISHED = 1
@@ -309,6 +306,12 @@ class MsgTask(models.Model):
             time_text = _('Running for {}').format(run_time)
         return '\n\n'.join([task_text, chat_text, settings.get_msg(), time_text])
 
+    def cancel_task(self):
+        status = self.get_status_msg()
+        finished = _('Finished at: {}').format(self.finished_at.strftime('%d.%m.%Y %H:%M:%S'))
+        return 'status: {}, time: {}'.format(status, finished)
+
+
     def __str__(self):
         return str(self.id)
 
@@ -317,7 +320,6 @@ class MsgTask(models.Model):
 
 
 class Chat(models.Model):
-
     class Status(enum.Enum):
         OK = 'ok'
         INVALID_LINK = 'invalid_link'

@@ -16,7 +16,6 @@ from aiogram.utils.exceptions import MessageToDeleteNotFound, MessageCantBeDelet
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters import Text, Regexp
 from aiogram.utils import markdown as md
-import more_itertools
 from tortoise.exceptions import DoesNotExist
 from tortoise.transactions import in_transaction
 
@@ -93,6 +92,8 @@ async def my_messages_page(query: types.CallbackQuery, state: FSMContext):
     page = data.get('page')
     op = operator.sub if query.data == 'prev' else operator.add
     page = op(page, 1)
+    await state.update_data(page=page)
+
     # TODO
 
 
@@ -181,10 +182,10 @@ async def task_group(update: Union[types.Message, types.CallbackQuery], state: F
     task_settings = await MsgSettings.create(filters=msg_settings.filters, limit=msg_settings.limit)
 
     task = await MsgTask.create(chat=chat, msg=msg, settings=task_settings)
-    # await task.filters.add(await UsersFilter.get(name=UsersFilter.Type.RECENT))
-    # task_name = 'send_message'
-    # task = asyncio.create_task(send_message(task), name=task_name)
-    # await state.update_data(msgs_task=task_name)
+    await task.filters.add(await UsersFilter.get(name=UsersFilter.Type.RECENT))
+    task_name = 'send_message'
+    task = asyncio.create_task(send_message(task), name=task_name)
+    await state.update_data(msgs_task=task_name)
     if is_query:
         await message.edit_text(_('Task started!'))
     else:
@@ -197,8 +198,11 @@ async def task_detail(query: types.CallbackQuery, state: FSMContext):
     await states.Task.detail.set()
     await delete_msg_preview(state)
     data = await state.get_data()
-    task = await MsgTask.get(id=data['task_id'])
-    msg = await task.get_details_msg()
+    try:
+        task = await MsgTask.get(id=data['task_id'])
+        msg = await task.get_details_msg()
+    except KeyError:
+        msg = _('There is no active tasks at the moment')
     await query.message.edit_text(msg, reply_markup=keyboards.task_detail(), disable_web_page_preview=True)
     await query.answer()
 
@@ -212,17 +216,21 @@ async def cancel_task(query: types.CallbackQuery, state: FSMContext):
     await query.answer()
 
 
-# @dp.callback_query_handler(Text(['yes', 'no']), state=states.Task.cancel)
-# async def cancel_task_confirm(query: types.CallbackQuery, state: FSMContext):
-#     if query.data == 'yes':
-#         data = await state.get_data()
-#         task = await MsgTask.get(id=data['task_id'])
-#         await task.cancel()
-#         msg = _('Task canceled.')
-#     else:
-#         msg = _('Task not canceled.')
-#     await query.message.edit_text(msg, reply_markup=keyboards.task_detail())
-#     await query.answer()
+@dp.callback_query_handler(Text(['yes', 'no']), state=states.Task.cancel)
+async def cancel_task_confirm(query: types.CallbackQuery, state: FSMContext):
+    if query.data == 'yes':
+        data = await state.get_data()
+        task = await MsgTask.get(id=data['task_id'])
+        task.cancel_task()
+        msg = _('Task canceled.')
+        await query.message.edit_text(msg, reply_markup=keyboards.main())
+        await MsgTask.filter(status=MsgTask.Status.ACTIVE).update(status=MsgTask.Status.CANCELED)
+        await states.main(query, state)
+        await query.answer()
+    else:
+        msg = _('Task not canceled.')
+        await query.message.edit_text(msg, reply_markup=keyboards.task_detail())
+        await query.answer()
 
 @dp.callback_query_handler(Text('back'), state=states.Task.detail)
 async def task_detail_back(query: types.CallbackQuery, state: FSMContext):
