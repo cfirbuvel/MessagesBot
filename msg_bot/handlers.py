@@ -16,7 +16,6 @@ from aiogram.utils.exceptions import MessageToDeleteNotFound, MessageCantBeDelet
 from aiogram.dispatcher import FSMContext
 from aiogram.dispatcher.filters import Text, Regexp
 from aiogram.utils import markdown as md
-import more_itertools
 from tortoise.exceptions import DoesNotExist
 from tortoise.transactions import in_transaction
 

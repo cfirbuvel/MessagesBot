@@ -8,7 +8,6 @@ import sys
 from aiogram import executor
 # from pyrogram.methods.utilities.idle import idle
 from tortoise import Tortoise
-import uvloop
 import watchfiles
 
 from msg_bot import settings
@@ -60,7 +59,6 @@ async def on_shutdown(dispatcher):
 
 
 def main():
-    uvloop.install()
     executor.start_polling(dp, on_startup=on_startup, on_shutdown=on_shutdown)
 
 
